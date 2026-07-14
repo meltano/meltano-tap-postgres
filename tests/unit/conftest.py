@@ -1,7 +1,13 @@
 """Fakes and fixtures for unit tests: no database required (SPEC §8.1)."""
 
+from collections.abc import Callable
+from typing import TypeVar
+
 import pytest
 import singer
+from psycopg2.extensions import connection
+
+_T_cur = TypeVar("_T_cur")
 
 
 class FakeCursor:
@@ -59,7 +65,13 @@ class FakeConnection:
         self.server_version = server_version
         self.closed = False
 
-    def cursor(self, name=None, cursor_factory=None):
+    def cursor(
+        self,
+        name: str | bytes | None = None,
+        cursor_factory: Callable[[connection, str | bytes | None], _T_cur] | None = None,
+        withhold: bool = False,
+        scrollable: bool | None = None,
+    ):
         return FakeCursor(self, rows=self.rows, results=self.results)
 
     def close(self):

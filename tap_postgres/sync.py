@@ -8,6 +8,7 @@ from singer import bookmarks
 
 from tap_postgres import config as cfg
 from tap_postgres import db, discovery, full_table, incremental, logical, stream_utils
+from tap_postgres.batch import ArrowBatchSource, BatchConfig
 
 LOGGER = singer.get_logger()
 
@@ -80,6 +81,7 @@ def sync_traditional_stream(
     state: dict[str, Any],
     method: str,
     end_lsn: int | None,
+    batch_config: BatchConfig | None = None,
 ) -> dict[str, Any]:
     stream_id = stream["tap_stream_id"]
     LOGGER.info("Syncing stream %s with method %s", stream_id, method)
@@ -95,17 +97,24 @@ def sync_traditional_stream(
 
     state = singer.set_currently_syncing(state, stream_id)
 
-    connection = db.open_connection(config, dbname=_database_name(stream))
+    # The source is either an ADBC batch source or a psycopg2 connection,
+    # never both: BATCH mode opens no psycopg2 connection at all, and
+    # LOG_BASED (including its initial snapshot) always uses RECORD messages.
+    dbname = _database_name(stream)
+    source: db.ConnectionProtocol | ArrowBatchSource
+    if batch_config is not None and method in ("FULL_TABLE", "INCREMENTAL"):
+        source = ArrowBatchSource(batch_config, dbname=dbname)
+    else:
+        source = db.open_connection(config, dbname=dbname)
+        db.register_type_adapters(source)
     try:
-        db.register_type_adapters(connection)
-
         if method == "FULL_TABLE":
             state, version, first_run = full_table.prepare(state, stream)
             state = full_table.sync_table(
-                connection, stream, state, config, columns, version, first_run
+                source, stream, state, config, columns, version, first_run
             )
         elif method == "INCREMENTAL":
-            state = incremental.sync_table(connection, stream, state, config, columns)
+            state = incremental.sync_table(source, stream, state, config, columns)
         elif method == "LOG_BASED":
             # Initial snapshot phase: bookmark the end LSN captured at run
             # start so the snapshot and the WAL stream dovetail (SPEC §6.3.4).
@@ -113,10 +122,11 @@ def sync_traditional_stream(
                 state = singer.write_bookmark(state, stream_id, "lsn", end_lsn)
             state, version, first_run = full_table.prepare(state, stream)
             state = full_table.sync_table(
-                connection, stream, state, config, columns, version, first_run
+                source, stream, state, config, columns, version, first_run
             )
     finally:
-        connection.close()
+        if not isinstance(source, ArrowBatchSource):
+            source.close()
 
     state = singer.set_currently_syncing(state, None)
     stream_utils.write_state_message(state)
@@ -130,6 +140,10 @@ def do_sync(
     state_file: Path | None,
 ) -> dict[str, Any]:
     state.setdefault("bookmarks", {})
+
+    # Fail fast on a bad batch_config (or a missing 'arrow' extra) before any
+    # sync work starts. LOG_BASED streams always stay in RECORD mode (MEL-541).
+    batch_config = BatchConfig.from_config(config)
 
     selected = [
         stream for stream in catalog.get("streams", []) if stream_utils.is_stream_selected(stream)
@@ -200,6 +214,7 @@ def do_sync(
             state,
             methods[stream["tap_stream_id"]],
             end_lsn,
+            batch_config=batch_config,
         )
 
     if logical_streams:

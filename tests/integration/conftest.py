@@ -3,7 +3,7 @@
 By default the PostgreSQL primary (built with wal2json, wal_level=logical) and a
 streaming read replica are provisioned automatically with testcontainers. Set
 TAP_POSTGRES_HOST (plus the other TAP_POSTGRES_* variables) to run against an
-externally managed server instead — e.g. the docker-compose stack or a CI service.
+externally managed server instead - e.g. the docker-compose stack or a CI service.
 """
 
 import os

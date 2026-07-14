@@ -21,7 +21,7 @@ def stream_metadata(stream: dict[str, Any]) -> dict[str, Any]:
     return metadata_map(stream).get((), {})
 
 
-def write_stream_metadata(stream: dict[str, Any], key: str, value: Any) -> None:
+def write_stream_metadata(stream: dict[str, Any], key: str, value: Any) -> None:  # ruff:ignore[any-type]
     """Set one stream-level (empty breadcrumb) metadata entry in place."""
     for entry in stream.setdefault("metadata", []):
         if not entry.get("breadcrumb"):
@@ -98,7 +98,7 @@ def key_properties(stream: dict[str, Any]) -> list[str]:
     return md.get("table-key-properties") or []
 
 
-def _truthy_metadata(value: Any, default: bool) -> bool:
+def _truthy_metadata(value: Any, default: bool) -> bool:  # ruff:ignore[any-type]
     if value is None:
         return default
     if isinstance(value, str):

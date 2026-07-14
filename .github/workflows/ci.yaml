@@ -59,7 +59,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --locked
       # Coverage gate from SPEC §8.1: >= 85% from unit tests alone.
-      - run: uv run pytest tests/unit --cov=tap_postgres --cov-fail-under=85
+      - run: uv run pytest tests/unit --cov=tap_postgres --cov-fail-under=87
 
   integration:
     name: Integration Tests
@@ -72,5 +72,5 @@ jobs:
       - run: uv sync --locked
       # Coverage gates from SPEC §8.1: >= 75% from integration tests alone,
       # >= 96% combined. Containers are provisioned by testcontainers.
-      - run: uv run pytest tests/integration --cov=tap_postgres --cov-fail-under=63
-      - run: uv run pytest tests --cov=tap_postgres --cov-fail-under=96
+      - run: uv run pytest tests/integration --cov=tap_postgres --cov-fail-under=77
+      - run: uv run pytest tests --cov=tap_postgres --cov-fail-under=98

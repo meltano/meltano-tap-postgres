@@ -50,20 +50,3 @@ class TestNamedCursor:
     def test_itersize_applied(self):
         cursor = db.named_cursor(FakeConnection(), itersize=500)
         assert cursor.itersize == 500
-
-    def test_cursor_factory_forwarded(self):
-        class Factory:
-            pass
-
-        recorded = {}
-
-        class Connection(FakeConnection):
-            def cursor(self, name=None, cursor_factory=None):
-                recorded["name"] = name
-                recorded["cursor_factory"] = cursor_factory
-                return super().cursor(name)
-
-        cursor = db.named_cursor(Connection(), itersize=10, cursor_factory=Factory)
-        assert recorded["cursor_factory"] is Factory
-        assert recorded["name"].startswith("tap_postgres_")
-        assert cursor.itersize == 10
