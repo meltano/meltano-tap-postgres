@@ -1,0 +1,106 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = [ "hatch-vcs", "hatchling" ]
+
+[project]
+name = "tap-postgres"
+description = "Singer tap for PostgreSQL, supporting FULL_TABLE, INCREMENTAL and LOG_BASED (wal2json) replication"
+readme = "README.md"
+keywords = [
+  "ELT",
+  "postgres",
+  "singer",
+  "tap",
+]
+license = { text = "MIT" }
+requires-python = ">=3.10"
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
+dynamic = [ "version" ]
+dependencies = [
+  # psycopg2 (not psycopg 3) is a deliberate choice: psycopg 3.x does not yet
+  # implement the streaming logical-replication protocol required by LOG_BASED.
+  # https://github.com/psycopg/psycopg/issues/71
+  "psycopg2-binary~=2.9.12",
+  "python-dateutil~=2.9.0",
+  "pytz==2026.2",
+  "singer-python~=6.8.0",
+  "typing-extensions~=4.16.0; python_version < '3.13'"
+]
+[[project.authors]]
+name = "Matatika"
+[project.scripts]
+tap-postgres = "tap_postgres.cli:main"
+
+[dependency-groups]
+dev = [
+  "ruff~=0.15.21",
+  { include-group = "test" },
+  { include-group = "typing" },
+]
+test = [
+  "pytest>=9.1",
+  "pytest-cov>=7.1",
+  "testcontainers>=4.15.0rc4",
+]
+typing = [
+  "ty>=0.0.59",
+  "types-psycopg2",
+  "types-simplejson",
+  { include-group = "test" },
+]
+
+[tool.hatch.build.targets.wheel]
+packages = [ "tap_postgres" ]
+[tool.hatch.version]
+fallback-version = "0.0.0.dev0"
+source = "vcs"
+
+[tool.ruff]
+line-length = 100
+preview = true
+[tool.ruff.lint]
+select = [
+  "ARG",
+  "B",
+  "C4",
+  "E",
+  "EM",
+  "F",
+  "FA",
+  "I",
+  "PT",
+  "RUF",
+  "SIM",
+  "TC",
+  "UP",
+  "W",
+]
+ignore = [
+  "SIM108", # ternary is not always clearer
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Fixtures are requested for their side effects, and fakes must match the
+# signatures of the real objects they stand in for.
+"tests/**" = [ "ARG", "EM" ]
+
+[tool.pytest]
+addopts = [ "-ra" ]
+filterwarnings = [
+  "error",
+  "once:datetime.datetime.utcnow:DeprecationWarning",
+]
+log_level = "INFO"
+markers = [
+  "integration: tests that need a real PostgreSQL server (docker compose up)",
+]
+minversion = "9"
+strict = true
+testpaths = [ "tests" ]

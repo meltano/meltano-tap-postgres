@@ -1,0 +1,45 @@
+# Test infrastructure (SPEC §8.1): a PostgreSQL primary built with wal2json and
+# wal_level=logical, plus a streaming-replication read replica for use_secondary coverage.
+services:
+  postgres_primary:
+    build: tests/docker
+    ports:
+      - "${TAP_POSTGRES_PORT:-5433}:5432"
+    environment:
+      POSTGRES_USER: tap_postgres
+      POSTGRES_PASSWORD: tappassword
+      POSTGRES_DB: tap_postgres_test
+    volumes:
+      - ./tests/docker/primary-init:/docker-entrypoint-initdb.d:ro
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=10
+      - -c
+      - max_wal_senders=10
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tap_postgres -d tap_postgres_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  postgres_replica:
+    build: tests/docker
+    ports:
+      - "${TAP_POSTGRES_SECONDARY_PORT:-5434}:5432"
+    user: postgres
+    environment:
+      PRIMARY_HOST: postgres_primary
+    volumes:
+      - ./tests/docker/replica-entrypoint.sh:/replica-entrypoint.sh:ro
+    entrypoint: ["bash", "/replica-entrypoint.sh"]
+    depends_on:
+      postgres_primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tap_postgres -d tap_postgres_test"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
