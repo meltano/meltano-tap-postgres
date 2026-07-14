@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import sys
 import uuid
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, TypeVar, overload
 
 import psycopg2
 import psycopg2.extensions
@@ -13,15 +14,21 @@ import singer
 
 from tap_postgres import config as cfg
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from types import TracebackType
+
+    from psycopg2.sql import Composable
+
+if sys.version_info >= (3, 12):
+    from typing import Self
+else:
+    from typing_extensions import Self
+
 if sys.version_info >= (3, 13):
     from typing import TypeVar
 else:
     from typing_extensions import TypeVar
-
-if TYPE_CHECKING:
-    from psycopg2._psycopg import connection
-
-    _TC = TypeVar("_TC", bound=connection, default=connection)
 
 LOGGER = singer.get_logger()
 
@@ -35,6 +42,62 @@ _TIME_OID = 1083
 _TIMETZ_OID = 1266
 
 
+_TC = TypeVar("_TC")
+_T_cur = TypeVar("_T_cur")
+_Vars: TypeAlias = Sequence[Any] | Mapping[str, Any] | None
+
+
+class CursorProtocol(Protocol):
+    itersize: int
+
+    def execute(self, query: str | bytes | Composable, vars: _Vars = None) -> None: ...
+    def fetchone(self) -> tuple[Any, ...] | None: ...
+    def close(self) -> None: ...
+    def __enter__(self) -> Self: ...
+    def __exit__(
+        self,
+        type: type[BaseException] | None,
+        value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None: ...
+
+    def __iter__(self) -> Self: ...
+    def __next__(self) -> tuple[Any, ...]: ...
+
+
+class ConnectionProtocol(Protocol):
+    """The slice of a connection that query helpers need (satisfied by fakes in tests)."""
+
+    @property
+    def closed(self) -> int: ...
+    def close(self) -> None: ...
+    @overload
+    def cursor(
+        self,
+        name: str | bytes | None = None,
+        cursor_factory: None = None,
+        withhold: bool = False,
+        scrollable: bool | None = None,
+    ) -> CursorProtocol: ...
+    @overload
+    def cursor(
+        self,
+        name: str | bytes | None = None,
+        *,
+        cursor_factory: Callable[[psycopg2.extensions.connection, str | bytes | None], _T_cur],
+        withhold: bool = False,
+        scrollable: bool | None = None,
+    ) -> _T_cur: ...
+    @overload
+    def cursor(
+        self,
+        name: str | bytes | None,
+        cursor_factory: Callable[[psycopg2.extensions.connection, str | bytes | None], _T_cur],
+        withhold: bool = False,
+        scrollable: bool | None = None,
+    ) -> _T_cur: ...
+
+
 def connection_dsn_kwargs(
     config: dict[str, Any],
     *,
@@ -44,7 +107,7 @@ def connection_dsn_kwargs(
     """Build psycopg2 connect() kwargs, routing to the replica when configured.
 
     ``primary=True`` forces the primary regardless of ``use_secondary``
-    (WAL/LSN operations, replication, log-based decode helpers — SPEC §2.3).
+    (WAL/LSN operations, replication, log-based decode helpers - SPEC §2.3).
     """
     use_secondary = cfg.use_secondary(config) and not primary
     kwargs: dict[str, Any] = {
@@ -81,19 +144,10 @@ def open_connection(
     return connection
 
 
-class SupportsNamedCursor(Protocol):
-    """The slice of a connection that named_cursor needs (satisfied by fakes in tests)."""
-
-    def cursor(self, name: str = ..., cursor_factory: Any = ...) -> Any: ...
-
-
-def named_cursor(connection: SupportsNamedCursor, itersize: int, cursor_factory: Any = None) -> Any:
+def named_cursor(connection: ConnectionProtocol, itersize: int) -> CursorProtocol:
     """A server-side cursor streaming rows in batches of ``itersize`` (SPEC §2.3)."""
     name = f"tap_postgres_{uuid.uuid4().hex}"
-    if cursor_factory is not None:
-        cursor = connection.cursor(name, cursor_factory=cursor_factory)
-    else:
-        cursor = connection.cursor(name)
+    cursor = connection.cursor(name)
     cursor.itersize = itersize
     return cursor
 
@@ -102,15 +156,11 @@ class EmptyResultError(Exception):
     """A query that must return a row returned none."""
 
 
-class SupportsCursor(Protocol):
-    """The slice of a connection that query helpers need (satisfied by fakes in tests)."""
-
-    def cursor(self) -> Any: ...
-
-
 def fetch_scalar(
-    connection: SupportsCursor, sql: str, params: tuple[Any, ...] | None = None
-) -> Any:
+    connection: ConnectionProtocol,
+    sql: str,
+    params: tuple[Any, ...] | None = None,
+) -> Any:  # ruff:ignore[any-type]
     """Execute a query expected to return one row and return its first column.
 
     Raises :class:`EmptyResultError` instead of crashing on ``fetchone()``
@@ -134,13 +184,13 @@ def fully_qualified_table_name(schema_name: str, table_name: str) -> str:
     return f"{quote_ident(schema_name)}.{quote_ident(table_name)}"
 
 
-def hstore_available(connection: connection) -> bool:
+def hstore_available(connection: ConnectionProtocol) -> bool:
     with connection.cursor() as cur:
         cur.execute("SELECT 1 FROM pg_type WHERE typname = 'hstore'")
         return cur.fetchone() is not None
 
 
-def register_hstore_if_available(connection: connection) -> bool:
+def register_hstore_if_available(connection: ConnectionProtocol) -> bool:
     """Enable the driver's hstore mapping when the server has the extension (SPEC §5)."""
     if hstore_available(connection):
         psycopg2.extras.register_hstore(connection)
@@ -148,7 +198,7 @@ def register_hstore_if_available(connection: connection) -> bool:
     return False
 
 
-def register_type_adapters(connection: connection) -> None:
+def register_type_adapters(connection: psycopg2.extensions.connection) -> None:
     """Configure driver-level decoding for traditional syncs (SPEC §6.4).
 
     - citext[], bit[], uuid[], money[] and enum-array values arrive as string arrays;
@@ -187,7 +237,7 @@ def register_type_adapters(connection: connection) -> None:
     psycopg2.extensions.register_type(time_as_string, connection)
 
 
-def log_encodings(connection: connection) -> None:
+def log_encodings(connection: ConnectionProtocol) -> None:
     """Log server and client encodings (SPEC §6.1)."""
     server_encoding = fetch_scalar(connection, "SHOW server_encoding")
     client_encoding = fetch_scalar(connection, "SHOW client_encoding")

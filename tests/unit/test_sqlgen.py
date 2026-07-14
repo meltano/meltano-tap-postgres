@@ -67,6 +67,12 @@ class TestFullTableSql:
         sql = full_table_sql(self._stream(), "public", ["id"], is_view=False, resuming=True)
         assert "WHERE age(xmin::xid) <= age(%s::text::xid)" in sql
 
+    def test_dollar_placeholder_for_adbc(self):
+        sql = full_table_sql(
+            self._stream(), "public", ["id"], is_view=False, resuming=True, placeholder="$1"
+        )
+        assert "WHERE age(xmin::xid) <= age($1::text::xid)" in sql
+
     def test_view_is_plain_unordered_select(self):
         sql = full_table_sql(self._stream(), "public", ["id"], is_view=True, resuming=False)
         assert sql == 'SELECT "id" FROM "public"."test_table"'
@@ -99,6 +105,19 @@ class TestIncrementalSql:
         assert 'ORDER BY "updated_at" ASC' in sql
         assert sql.startswith("SELECT ")
         assert sql.endswith(") pg_speedup_trick")
+
+    def test_dollar_placeholder_for_adbc(self):
+        sql = incremental_sql(
+            self._stream(),
+            "public",
+            ["id", "updated_at"],
+            "updated_at",
+            "timestamp with time zone",
+            has_bookmark=True,
+            limit=None,
+            placeholder="$1",
+        )
+        assert 'WHERE "updated_at" >= $1::timestamp with time zone' in sql
 
     def test_bookmark_is_bound_parameter_with_cast(self):
         sql = incremental_sql(

@@ -58,6 +58,62 @@ tap-postgres --config config.json --catalog catalog.json --state state.json
 | `use_secondary` | boolean | false | Route FULL_TABLE/INCREMENTAL/discovery reads to a replica. WAL and LSN operations always use the primary. |
 | `secondary_host` | string | — | Replica host (required with `use_secondary`). |
 | `secondary_port` | integer | — | Replica port (required with `use_secondary`). |
+| `batch_config` | object | none | Opts into Singer BATCH message mode (see *BATCH mode* below). Follows the [Meltano Singer SDK's `batch_config` shape](https://sdk.meltano.com); the presence of the key alone (even `{}`) is enough to opt in. |
+
+## BATCH mode (Arrow)
+
+Setting the `batch_config` key opts FULL_TABLE and INCREMENTAL streams into
+[Singer BATCH message mode](https://sdk.meltano.com/en/latest/batch.html): instead of per-row
+`RECORD` messages, rows are written to local [Apache Arrow](https://arrow.apache.org/) IPC files
+and a `BATCH` message referencing each file is emitted. Rows are read from PostgreSQL over
+[ADBC](https://arrow.apache.org/adbc/) (`adbc-driver-manager`'s DBAPI layer plus the native
+PostgreSQL ADBC driver) as Arrow record batches with no per-row Python materialization, which is
+dramatically faster for wide/large tables — provided the target consumes BATCH messages with
+`arrow` encoding.
+
+Replication method support:
+
+| Replication method | With `batch_config` set |
+|---|---|
+| `FULL_TABLE` | `BATCH` messages |
+| `INCREMENTAL` | `BATCH` messages |
+| `LOG_BASED` | Always `RECORD` messages (including the initial snapshot) |
+
+### Configuration shape
+
+The shape follows the Meltano Singer SDK's `batch_config` setting, with one deliberate
+narrowing: only `encoding.format: "arrow"` is supported for now (`jsonl`/`parquet` are deferred).
+
+```json
+{
+  "batch_config": {
+    "encoding": {"format": "arrow"},
+    "storage": {"root": "/tmp/batches"},
+    "batch_size": 500000
+  }
+}
+```
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `encoding.format` | string | `arrow` | Batch file encoding. Only `arrow` is supported. |
+| `storage.root` | string | the OS temp directory | Local directory batch files are written to (must exist). |
+| `batch_size` | integer | `500000` | Rows per batch file (a flush threshold: files can be slightly larger, since whole record batches are buffered). |
+
+### Semantics
+
+- ADBC connections reuse the regular connectivity settings (`host`/`port`/`user`/`password`/
+  `dbname`, `ssl`, `use_secondary`/`secondary_host`/`secondary_port`) — no new connection keys.
+- `SCHEMA`, `STATE` and `ACTIVATE_VERSION` messages behave exactly as in RECORD mode; bookmarks
+  (xmin watermark, replication key value) are identical across the two modes, so runs can switch
+  modes freely. A `STATE` message is only emitted after the batch file it reflects has been
+  published.
+- Record batches pass through to the files untouched: downstream consumers handle Arrow-native
+  types (e.g. `decimal128` precision/scale, timezone-aware timestamps) themselves, with no JSON
+  round-tripping. Driver-level type behavior follows the PostgreSQL ADBC driver, not psycopg2 —
+  exotic types (hstore, enums, custom types) may differ from RECORD mode output.
+- Batch files are written locally and are not cleaned up by the tap; the consumer owns their
+  lifecycle.
 
 ## LOG_BASED setup (operator checklist)
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import simplejson
 import singer
@@ -13,9 +13,6 @@ from singer import metadata as metadata_module
 
 from tap_postgres import config as cfg
 from tap_postgres import db, stream_utils
-
-if TYPE_CHECKING:
-    from psycopg2.extensions import connection
 
 LOGGER = singer.get_logger()
 
@@ -311,7 +308,7 @@ def build_stream_entry(
 
 
 def discover_streams(
-    connection: connection,
+    connection: db.ConnectionProtocol,
     *,
     itersize: int,
     filter_schemas: list[str] | None = None,
@@ -399,7 +396,10 @@ def discover_streams(
 
 
 def do_discovery(
-    connection: connection, *, itersize: int, filter_schemas: list[str] | None
+    connection: db.ConnectionProtocol,
+    *,
+    itersize: int,
+    filter_schemas: list[str] | None,
 ) -> None:
     """Discovery mode: write the catalog to stdout (SPEC §3.1)."""
     streams = discover_streams(connection, itersize=itersize, filter_schemas=filter_schemas)

@@ -1,5 +1,7 @@
 """LOG_BASED replication via wal2json format version 2 (SPEC §6.3)."""
 
+from __future__ import annotations
+
 import datetime
 import json
 import re
@@ -7,8 +9,7 @@ import select
 import sys
 import time
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import dateutil.parser
 import psycopg2
@@ -18,6 +19,9 @@ from singer import utils
 
 from tap_postgres import config as cfg
 from tap_postgres import db, discovery, stream_utils
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 if sys.version_info < (3, 11):
     from backports.datetime_fromisoformat import MonkeyPatch
@@ -134,7 +138,11 @@ def generate_slot_name(dbname: str, tap_id: str | None = None) -> str:
     return re.sub(r"[^a-z0-9_]", "_", raw.lower())
 
 
-def locate_replication_slot_by_cur(cursor: Any, dbname: str, tap_id: str | None = None) -> str:
+def locate_replication_slot_by_cur(
+    cursor: db.CursorProtocol,
+    dbname: str,
+    tap_id: str | None = None,
+) -> str:
     """Probe the un-suffixed name first (legacy deployments), then the suffixed one."""
     candidates = [generate_slot_name(dbname)]
     if tap_id:
@@ -150,7 +158,11 @@ def locate_replication_slot_by_cur(cursor: Any, dbname: str, tap_id: str | None 
     raise LogicalReplicationError(msg)
 
 
-def locate_replication_slot(connection: Any, dbname: str, tap_id: str | None = None) -> str:
+def locate_replication_slot(
+    connection: db.ConnectionProtocol,
+    dbname: str,
+    tap_id: str | None = None,
+) -> str:
     with connection.cursor() as cur:
         return locate_replication_slot_by_cur(cur, dbname, tap_id)
 
@@ -189,7 +201,7 @@ def add_automatic_properties(stream: dict[str, Any], debug_lsn: bool) -> dict[st
 # Value decoding (SPEC §6.3.6)
 
 
-def parse_logical_timestamp(value: Any) -> str:
+def parse_logical_timestamp(value: Any) -> str:  # ruff:ignore[any-type]
     """wal2json timestamps to ISO-8601, degrading to the max sentinel (SPEC §6.3.6)."""
     if isinstance(value, datetime.datetime):
         parsed = value
@@ -215,7 +227,7 @@ def parse_logical_timestamp(value: Any) -> str:
     return parsed.isoformat()
 
 
-def parse_logical_date(value: Any) -> str:
+def parse_logical_date(value: Any) -> str:  # ruff:ignore[any-type]
     """Dates to ISO-8601 midnight; years above 9999 degrade, other failures are fatal."""
     if isinstance(value, datetime.date):
         return value.isoformat() + "T00:00:00+00:00"
@@ -226,19 +238,19 @@ def parse_logical_date(value: Any) -> str:
     return datetime.date.fromisoformat(text).isoformat() + "T00:00:00+00:00"
 
 
-def reconstruct_array(literal: Any, element_type: str, connection: Any) -> list | None:
+def reconstruct_array(literal: Any, element_type: str, connection: Any) -> list | None:  # ruff:ignore[any-type]
     """Cast a PostgreSQL array literal back to a typed array on the server."""
     cast_type = element_type if element_type in NATIVE_ARRAY_CAST_TYPES else "text"
     return db.fetch_scalar(connection, f"SELECT %s::{cast_type}[]", (literal,))
 
 
-def explode_hstore(literal: str, connection: Any) -> dict[str, Any]:
+def explode_hstore(literal: str, connection: db.ConnectionProtocol) -> dict[str, Any]:
     """Ask the server to explode an hstore literal into a key/value array."""
     flat = db.fetch_scalar(connection, "SELECT hstore_to_array(%s::hstore)", (literal,)) or []
     return dict(zip(flat[::2], flat[1::2], strict=True))
 
 
-def selected_value_to_singer_value(value: Any, sql_datatype: str, connection_supplier: Any) -> Any:
+def selected_value_to_singer_value(value: Any, sql_datatype: str, connection_supplier: Any) -> Any:  # ruff:ignore[any-type]
     """Decode one wal2json value using the column's catalog datatype (SPEC §6.3.6)."""
     if value is None:
         return None
@@ -354,7 +366,7 @@ class LogicalSession:
         self.processed_advances = 0
         self.received_first_message = False
         self.rows_synced: dict[str, int] = {}
-        self._helper_connection: Any = None
+        self._helper_connection: db.ConnectionProtocol | None = None
 
     # -- helpers -----------------------------------------------------------
 
@@ -363,7 +375,7 @@ class LogicalSession:
         lsns = [lsn for lsn in lsns if lsn is not None]
         return min(lsns) if lsns else None
 
-    def helper_connection(self) -> Any:
+    def helper_connection(self) -> db.ConnectionProtocol:
         """Primary-side connection for array/hstore reconstruction (SPEC §2.3)."""
         if self._helper_connection is None or self._helper_connection.closed:
             self._helper_connection = db.open_connection(
@@ -462,7 +474,11 @@ class LogicalSession:
 
     # -- flush control (SPEC §6.3.7) ----------------------------------------
 
-    def flush_on_first_message(self, cursor: Any, first_lsn: int) -> None:
+    def flush_on_first_message(
+        self,
+        cursor: psycopg2.extras.ReplicationCursor,
+        first_lsn: int,
+    ) -> None:
         if self.received_first_message:
             return
         self.received_first_message = True
@@ -471,7 +487,10 @@ class LogicalSession:
         cursor.send_feedback(flush_lsn=flush_to, force=True)
         self.flushed_lsn = flush_to
 
-    def refresh_committed_lsn_from_state_file(self, cursor: Any) -> None:
+    def refresh_committed_lsn_from_state_file(
+        self,
+        cursor: psycopg2.extras.ReplicationCursor,
+    ) -> None:
         """Re-read the state file; advance the flush position only past data the
         downstream target has durably committed."""
         if not self.state_file:

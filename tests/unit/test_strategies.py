@@ -78,7 +78,13 @@ class TestFullTableSync:
         stream = make_stream(stream_metadata={"is-view": True, "view-key-properties": ["id"]})
         connection = FakeConnection(rows=[(1, "a")])  # no leading xmin column
         state = full_table.sync_table(
-            connection, stream, {"bookmarks": {}}, {}, ["id", "name"], 555, True
+            connection,
+            stream,
+            {"bookmarks": {}},
+            {},
+            ["id", "name"],
+            555,
+            True,
         )
         sql = connection.executed[-1][0]
         assert "xmin" not in sql
@@ -92,9 +98,9 @@ class TestHstoreRegistration:
         monkeypatch.setattr(psycopg2.extras, "register_hstore", lambda conn: calls.append(conn))
         available = FakeConnection(results={"pg_type": [(1,)]})
         missing = FakeConnection(results={"pg_type": []})
-        assert db.register_hstore_if_available(available) is True  # ty:ignore[invalid-argument-type]
+        assert db.register_hstore_if_available(available) is True
         assert calls == [available]
-        assert db.register_hstore_if_available(missing) is False  # ty:ignore[invalid-argument-type]
+        assert db.register_hstore_if_available(missing) is False
         assert calls == [available]
 
 

@@ -1,8 +1,13 @@
 """Logical replication unit coverage (SPEC §8.2), no database required."""
 
+from __future__ import annotations
+
+import abc
 import datetime
 import json
+from collections.abc import Mapping, Sequence
 from decimal import Decimal
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 import psycopg2
 import pytest
@@ -28,6 +33,47 @@ from tap_postgres.logical import (
     validate_server_version,
 )
 from tests.unit.conftest import FakeConnection, make_stream
+
+if TYPE_CHECKING:
+    from types import TracebackType
+
+    from psycopg2.sql import Composable
+
+_Vars: TypeAlias = Sequence[Any] | Mapping[str, Any] | None
+
+
+class BaseRecordingCursor(abc.ABC):
+    itersize = 1
+
+    def __init__(self):
+        self.queries = []
+        self._hit = None
+
+    @abc.abstractmethod
+    def execute(self, query: str | bytes | Composable, vars: _Vars = None) -> None: ...
+
+    def fetchone(self):
+        return self._hit
+
+    def close(self) -> None:
+        return
+
+    def __enter__(self):
+        return self
+
+    def __exit__(
+        self,
+        type: type[BaseException] | None,
+        value: BaseException | None,
+        traceback: TracebackType | None,
+    ):
+        return
+
+    def __iter__(self):
+        return self
+
+    def __next__(self) -> tuple[Any, ...]:
+        return ()
 
 
 class TestLsnConversion:
@@ -63,44 +109,32 @@ class TestSlotNames:
         return FakeConnection(results={"pg_replication_slots": [(s,) for s in slots]})
 
     def test_lookup_prefers_unsuffixed_name(self):
-        class RecordingCursor:
-            def __init__(self):
-                self.queries = []
-                self._hit = None
-
-            def execute(self, sql, params):
-                self.queries.append(params[0])
-                self._hit = (params[0],) if params[0] == "tap_postgres_db" else None
-
-            def fetchone(self):
-                return self._hit
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *a):
-                return False
+        class RecordingCursor(BaseRecordingCursor):
+            def execute(self, query, vars=None):
+                assert vars is not None
+                self.queries.append(vars[0])
+                self._hit = (vars[0],) if vars[0] == "tap_postgres_db" else None
 
         cursor = RecordingCursor()
         assert logical.locate_replication_slot_by_cur(cursor, "db", "pipe") == "tap_postgres_db"
         assert cursor.queries == ["tap_postgres_db"]
 
     def test_lookup_falls_back_to_suffixed_name(self):
-        class RecordingCursor:
-            def __init__(self):
-                self.queries = []
-                self._hit = None
-
-            def execute(self, sql, params):
-                self.queries.append(params[0])
-                self._hit = (params[0],) if params[0] == "tap_postgres_db_pipe" else None
-
-            def fetchone(self):
-                return self._hit
+        class RecordingCursor(BaseRecordingCursor):
+            def execute(self, query, vars=None):
+                assert vars is not None
+                assert isinstance(vars, tuple)
+                self.queries.append(vars[0])
+                self._hit = (vars[0],) if vars[0] == "tap_postgres_db_pipe" else None
 
         cursor = RecordingCursor()
         assert (
-            logical.locate_replication_slot_by_cur(cursor, "db", "pipe") == "tap_postgres_db_pipe"
+            logical.locate_replication_slot_by_cur(
+                cursor,
+                "db",
+                "pipe",
+            )
+            == "tap_postgres_db_pipe"
         )
         assert cursor.queries == ["tap_postgres_db", "tap_postgres_db_pipe"]
 

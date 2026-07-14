@@ -32,7 +32,7 @@ def fix_hour_24(time_string: str) -> str:
     return time_string
 
 
-def convert_time(value: Any, with_timezone: bool) -> str:
+def convert_time(value: Any, with_timezone: bool) -> str:  # ruff:ignore[any-type]
     """Times become HH:MM:SS strings; tz-aware times convert to UTC first (SPEC §5)."""
     if isinstance(value, datetime.time):
         parsed = value
@@ -55,7 +55,7 @@ def convert_date(value: datetime.date) -> str:
     return value.isoformat() + "T00:00:00+00:00"
 
 
-def selected_value_to_singer_value(value: Any, sql_datatype: str | None) -> Any:
+def selected_value_to_singer_value(value: Any, sql_datatype: str | None) -> Any:  # ruff:ignore[any-type]
     """Convert one column value from the driver's native typing (SPEC §5).
 
     Columns missing from the catalog metadata (``sql_datatype`` is None) fall

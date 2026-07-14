@@ -73,7 +73,7 @@ def orchestrated(monkeypatch):
     """do_sync with every database touchpoint replaced by a recorder."""
     calls = {"traditional": [], "logical": []}
 
-    def fake_traditional(config, stream, state, method, end_lsn):
+    def fake_traditional(config, stream, state, method, end_lsn, batch_config=None):
         calls["traditional"].append(stream["tap_stream_id"])
         return state
 

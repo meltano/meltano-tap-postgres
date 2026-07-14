@@ -1,12 +1,15 @@
 """INCREMENTAL replication (SPEC §6.2)."""
 
+from __future__ import annotations
+
 from typing import Any
 
 import singer
 from singer import metrics, utils
 
+from tap_postgres import adbc, db, sqlgen, stream_utils
 from tap_postgres import config as cfg
-from tap_postgres import db, sqlgen, stream_utils
+from tap_postgres.batch import ArrowBatchSource, ArrowBatchWriter
 from tap_postgres.conversion import selected_value_to_singer_value
 from tap_postgres.full_table import new_table_version
 
@@ -39,12 +42,18 @@ def validate_bookmark_keys(state: dict[str, Any], stream_id: str) -> None:
 
 
 def sync_table(
-    connection: Any,
+    source: db.ConnectionProtocol | ArrowBatchSource,
     stream: dict[str, Any],
     state: dict[str, Any],
     config: dict[str, Any],
     columns: list[str],
 ) -> dict[str, Any]:
+    """Sync rows at or beyond the replication-key bookmark.
+
+    ``source`` selects the read path: a psycopg2 connection emits per-row
+    RECORD messages, an :class:`ArrowBatchSource` emits Arrow BATCH messages
+    read over ADBC.
+    """
     stream_id = stream["tap_stream_id"]
     dest_stream = stream_utils.dest_stream_name(stream)
     schema_name = stream_utils.schema_name(stream)
@@ -73,8 +82,19 @@ def sync_table(
     # across runs, so activating it every run is safe.
     singer.write_message(singer.ActivateVersionMessage(stream=dest_stream, version=version))
 
-    db.log_encodings(connection)
-    hstore = db.register_hstore_if_available(connection)
+    if isinstance(source, ArrowBatchSource):
+        return _sync_table_arrow(
+            stream,
+            state,
+            config,
+            columns,
+            replication_key,
+            key_datatype,
+            source,
+        )
+
+    db.log_encodings(source)
+    hstore = db.register_hstore_if_available(source)
     LOGGER.info("hstore %s available", "is" if hstore else "is not")
 
     bookmark_value = singer.get_bookmark(state, stream_id, "replication_key_value")
@@ -93,7 +113,7 @@ def sync_table(
     datatypes = {column: stream_utils.sql_datatype_for_column(stream, column) for column in columns}
     time_extracted = utils.now()
     rows_saved = 0
-    cursor = db.named_cursor(connection, cfg.itersize(config))
+    cursor = db.named_cursor(source, cfg.itersize(config))
     try:
         cursor.execute(sql, params)
         with metrics.record_counter(dest_stream) as counter:
@@ -123,4 +143,69 @@ def sync_table(
     finally:
         cursor.close()
 
+    return state
+
+
+def _sync_table_arrow(
+    stream: dict[str, Any],
+    state: dict[str, Any],
+    config: dict[str, Any],
+    columns: list[str],
+    replication_key: str,
+    key_datatype: str,
+    source: ArrowBatchSource,
+) -> dict[str, Any]:
+    """The BATCH-message path: stream Arrow record batches through ADBC (MEL-541).
+
+    Record batches pass through to the batch files untouched - targets consume
+    Arrow-native types. Only the replication-key bookmark goes through the
+    Singer value conversion, so state files stay identical across RECORD and
+    BATCH modes. A STATE message is emitted whenever a batch file has been
+    published (never ahead of the emitted data).
+    """
+    stream_id = stream["tap_stream_id"]
+    dest_stream = stream_utils.dest_stream_name(stream)
+    schema_name = stream_utils.schema_name(stream)
+
+    bookmark_value = singer.get_bookmark(state, stream_id, "replication_key_value")
+    sql = sqlgen.incremental_sql(
+        stream,
+        schema_name,
+        columns,
+        replication_key,
+        key_datatype,
+        has_bookmark=bookmark_value is not None,
+        limit=config.get("limit"),
+        placeholder="$1",
+    )
+    params = (bookmark_value,) if bookmark_value is not None else None
+    LOGGER.info("Running (Arrow/ADBC) %s", sql)
+
+    batch_writer = ArrowBatchWriter(dest_stream, source.batch_config)
+    with (
+        metrics.record_counter(dest_stream) as counter,
+        adbc.stream_record_batches(config, sql, params, dbname=source.dbname) as reader,
+    ):
+        for record_batch in reader:
+            if record_batch.num_rows == 0:
+                continue
+            counter.increment(record_batch.num_rows)
+
+            # Write before bookmarking so a mid-write exception does not
+            # advance the bookmark past the last successfully emitted batch.
+            checkpoint = batch_writer.write(record_batch)
+
+            # The query orders by the key ascending with NULLs last, so the
+            # last non-null value is the batch's maximum; a NULL key never
+            # poisons the bookmark (SPEC §6.2).
+            key_values = record_batch.column(replication_key).drop_null()
+            if len(key_values):
+                key_value = selected_value_to_singer_value(
+                    key_values[len(key_values) - 1].as_py(), key_datatype
+                )
+                state = singer.write_bookmark(state, stream_id, "replication_key_value", key_value)
+            if checkpoint:
+                stream_utils.write_state_message(state)
+
+    batch_writer.flush()
     return state

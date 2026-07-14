@@ -30,7 +30,7 @@ def select_expression(column: str, sql_datatype: str | None) -> str:
     """Render one column for the select list.
 
     Scalar timestamp columns are clamped in the query itself: any value outside
-    0001-01-01..9999-12-31 23:59:59.999 becomes the *maximum* sentinel — the
+    0001-01-01..9999-12-31 23:59:59.999 becomes the *maximum* sentinel - the
     below-range direction is deliberate (SPEC §5, §10.2.3). Timestamp arrays and
     columns missing from metadata pass through unwrapped.
     """
@@ -62,18 +62,21 @@ def full_table_sql(
     *,
     is_view: bool,
     resuming: bool,
+    placeholder: str = "%s",
 ) -> str:
     """FULL_TABLE extraction query (SPEC §6.1).
 
     Tables are ordered by xmin rendered as text, with each row's xmin selected
     so it can be bookmarked; a resuming run restricts by xmin age. Views get a
-    plain unordered SELECT. The xmin bookmark is bound as a query parameter.
+    plain unordered SELECT. The xmin bookmark is bound as a query parameter -
+    ``placeholder`` selects its style (psycopg2's ``%s``, or ``$1`` for the
+    server-side prepared statements of the ADBC BATCH path).
     """
     table = fully_qualified_table_name(schema_name, stream["table_name"])
     select = select_list(stream, columns)
     if is_view:
         return f"SELECT {select} FROM {table}"
-    where = "WHERE age(xmin::xid) <= age(%s::text::xid) " if resuming else ""
+    where = f"WHERE age(xmin::xid) <= age({placeholder}::text::xid) " if resuming else ""
     return f"SELECT xmin::text, {select} FROM {table} {where}ORDER BY xmin::text ASC"
 
 
@@ -86,13 +89,15 @@ def incremental_sql(
     *,
     has_bookmark: bool,
     limit: int | None,
+    placeholder: str = "%s",
 ) -> str:
     """INCREMENTAL extraction query (SPEC §6.2).
 
     The chosen columns are selected from a subquery that filters by
-    `key >= <bookmark>` (inclusive — at-least-once delivery) and orders by the
+    `key >= <bookmark>` (inclusive - at-least-once delivery) and orders by the
     key ascending; the bookmark value is bound as a query parameter and cast to
-    the key's SQL datatype.
+    the key's SQL datatype. ``placeholder`` selects the parameter style
+    (psycopg2's ``%s``, or ``$1`` for the ADBC BATCH path).
     """
     table = fully_qualified_table_name(schema_name, stream["table_name"])
     select = select_list(stream, columns)
@@ -100,7 +105,7 @@ def incremental_sql(
     where = ""
     if has_bookmark:
         datatype = validate_datatype(replication_key_datatype)
-        where = f"WHERE {key} >= %s::{datatype} "
+        where = f"WHERE {key} >= {placeholder}::{datatype} "
     limit_clause = f" LIMIT {int(limit)}" if limit else ""
     return (
         f"SELECT {select} FROM ("

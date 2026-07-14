@@ -1,4 +1,4 @@
-# tap-postgres — Functional Specification
+# tap-postgres - Functional Specification
 
 A specification for a clean-room implementation of a [Singer](https://github.com/singer-io/getting-started/blob/master/docs/SPEC.md) tap that extracts data from PostgreSQL. It describes observable behavior only: configuration, catalog discovery, the three replication methods, state management, emitted messages, dependencies, and the test strategy. It intentionally does not reference any existing source code. Sections 1–9 describe the reference behavior as-is; §10 separates the behaviors that are contractual from those that are incidental and may be improved.
 
@@ -57,14 +57,14 @@ All settings live in the JSON config file. Required keys are validated at startu
 | `break_at_end_lsn` | boolean | true | Log-based sync: stop as soon as a received WAL message is beyond the server's current LSN captured at startup. |
 | `debug_lsn` | string | none | When the *string* `"true"`, every log-based record gets an additional `_sdc_lsn` string property holding the WAL position that produced it. |
 | `use_secondary` | boolean | false | When true, FULL_TABLE and INCREMENTAL reads go to a replica. Logical replication and all "must be primary" operations still use the primary. |
-| `secondary_host` | string | — | Replica host. **Required** when `use_secondary` is true (startup error otherwise). |
-| `secondary_port` | integer | — | Replica port. **Required** when `use_secondary` is true. |
+| `secondary_host` | string | - | Replica host. **Required** when `use_secondary` is true (startup error otherwise). |
+| `secondary_port` | integer | - | Replica port. **Required** when `use_secondary` is true. |
 
 ### 2.3 Connection behavior
 
 Every connection the tap opens must:
 
-- set a fixed application name identifying the tap (an arbitrary, implementation-chosen constant — useful for spotting the tap's sessions in `pg_stat_activity`);
+- set a fixed application name identifying the tap (an arbitrary, implementation-chosen constant - useful for spotting the tap's sessions in `pg_stat_activity`);
 - use a connection timeout of 30 seconds;
 - pass SSL mode `require` when configured (§2.2).
 
@@ -135,7 +135,7 @@ Primary-key columns omit `"null"` from their type list; all other columns are nu
 | PostgreSQL type | JSON Schema |
 |---|---|
 | `smallint`, `integer`, `bigint` | `integer`, with `minimum` = −2^(p−1) and `maximum` = 2^(p−1)−1 where p is the type's bit width (16/32/64). |
-| `numeric`/`decimal` | `number` with `exclusiveMinimum` = −10^(precision−scale), `exclusiveMaximum` = 10^(precision−scale), `multipleOf` = 10^(−scale). Unconstrained numerics default to precision 100 / scale 38; declared values above those caps are clamped (with a warning) — this can truncate. |
+| `numeric`/`decimal` | `number` with `exclusiveMinimum` = −10^(precision−scale), `exclusiveMaximum` = 10^(precision−scale), `multipleOf` = 10^(−scale). Unconstrained numerics default to precision 100 / scale 38; declared values above those caps are clamped (with a warning) - this can truncate. |
 | `real`, `double precision` | `number`. |
 | `boolean` | `boolean`. |
 | `bit(1)` | `boolean`. |
@@ -152,9 +152,9 @@ Primary-key columns omit `"null"` from their type list; all other columns are nu
 
 PostgreSQL does not enforce array dimensionality, so array columns are typed recursively: an array item may be a scalar or another array, to any depth. Array columns get schema `{"type": ["null", "array"], "items": {"$ref": "#/definitions/<name>"}}`, and the stream schema's `definitions` always includes this family of self-referential schemas:
 
-- `sdc_recursive_integer_array` — `["null","integer","array"]`, items self-reference;
-- `sdc_recursive_number_array`, `sdc_recursive_string_array`, `sdc_recursive_boolean_array`, `sdc_recursive_object_array` — same pattern with the respective scalar type;
-- `sdc_recursive_timestamp_array` — string variant with `format: date-time`.
+- `sdc_recursive_integer_array` - `["null","integer","array"]`, items self-reference;
+- `sdc_recursive_number_array`, `sdc_recursive_string_array`, `sdc_recursive_boolean_array`, `sdc_recursive_object_array` - same pattern with the respective scalar type;
+- `sdc_recursive_timestamp_array` - string variant with `format: date-time`.
 
 Element-type routing: integer-family arrays → integer definition; `real[]`/`double precision[]` → number; `boolean[]`/`bit[]` → boolean; `json[]`/`jsonb[]`/`hstore[]` → object; `date[]`/`timestamp...[]` → timestamp; everything else (text, varchar, citext, uuid, money, time, network types, enums, unknown) → string.
 
@@ -186,8 +186,8 @@ Streams are partitioned into "traditional" work (FULL_TABLE, INCREMENTAL, and th
 
 | Method | Bookmarks present | Assigned work |
 |---|---|---|
-| FULL_TABLE | — | full table sync |
-| INCREMENTAL | — | incremental sync |
+| FULL_TABLE | - | full table sync |
+| INCREMENTAL | - | incremental sync |
 | LOG_BASED | neither `xmin` nor `lsn` | initial full-table phase (new stream) |
 | LOG_BASED | both `xmin` and `lsn` | resume an interrupted initial full-table phase |
 | LOG_BASED | `lsn` only | pure logical streaming |
@@ -200,7 +200,7 @@ After all traditional work, pure-logical streams are grouped by their `database-
 ### 4.4 Emitted message conventions
 
 - **Destination stream name** in `SCHEMA`/`RECORD`/`ACTIVATE_VERSION` messages is `<schema-name>-<stream>` (schema name from metadata).
-- **`SCHEMA` messages** carry: the stream's JSON schema; `key_properties` from `table-key-properties` (or `view-key-properties` for views, defaulting to empty); and `bookmark_properties` — empty for FULL_TABLE, the replication key for INCREMENTAL, `lsn` for LOG_BASED. Schema serialization must be decimal-precision-safe (numeric constraints like `multipleOf: 1e-38` must not lose precision).
+- **`SCHEMA` messages** carry: the stream's JSON schema; `key_properties` from `table-key-properties` (or `view-key-properties` for views, defaulting to empty); and `bookmark_properties` - empty for FULL_TABLE, the replication key for INCREMENTAL, `lsn` for LOG_BASED. Schema serialization must be decimal-precision-safe (numeric constraints like `multipleOf: 1e-38` must not lose precision).
 - **`RECORD` messages** carry `version` (the stream's table version) and `time_extracted`.
 - **`STATE` messages** carry the complete state object (deep copy at time of emission).
 
@@ -268,9 +268,9 @@ Every run extracts the whole table, with resumability inside a single table copy
 5. Stream all rows as `RECORD`s.
 6. Emit a final `ACTIVATE_VERSION` at the end of every run, signaling the target may discard rows from older versions.
 
-**Extraction & resume:** rows are selected ordered by the table's transaction-id system column (`xmin`) rendered as text, and each row's `xmin` value is written to the stream's `xmin` bookmark as it goes (a `STATE` message every 1,000 rows). If a run starts with an `xmin` bookmark present, the query restricts to rows whose `xmin` age is less than or equal to the bookmarked transaction's age — i.e., resume from where the previous copy stopped (age comparison makes this robust against transaction-id wraparound). When the copy finishes, the `xmin` bookmark is cleared. Note: resume is best-effort; text-ordering of xmin and concurrent writes make it approximate, which is acceptable because a full-table version is only activated once complete.
+**Extraction & resume:** rows are selected ordered by the table's transaction-id system column (`xmin`) rendered as text, and each row's `xmin` value is written to the stream's `xmin` bookmark as it goes (a `STATE` message every 1,000 rows). If a run starts with an `xmin` bookmark present, the query restricts to rows whose `xmin` age is less than or equal to the bookmarked transaction's age - i.e., resume from where the previous copy stopped (age comparison makes this robust against transaction-id wraparound). When the copy finishes, the `xmin` bookmark is cleared. Note: resume is best-effort; text-ordering of xmin and concurrent writes make it approximate, which is acceptable because a full-table version is only activated once complete.
 
-**Views** are synced with a plain unordered `SELECT` of the selected columns — no xmin ordering, no resume bookmark; the version is always fresh. Key properties come from `view-key-properties` metadata.
+**Views** are synced with a plain unordered `SELECT` of the selected columns - no xmin ordering, no resume bookmark; the version is always fresh. Key properties come from `view-key-properties` metadata.
 
 Before extraction, the strategy logs the server and client encodings, registers hstore support when available, and applies the timestamp clamp (§5) to scalar timestamp columns.
 
@@ -282,10 +282,10 @@ Extracts only rows whose replication-key value is **greater than or equal to** t
 
 **Behavior:**
 
-1. Reuse the `version` bookmark if present, else pick a fresh one (an interrupted incremental run keeps the same version — resumption relies on the key bookmark, not versioning).
-2. Write `version` and `replication_key` bookmarks; emit `STATE`; emit `SCHEMA` (with the replication key as bookmark property); emit `ACTIVATE_VERSION` (every run — incremental never truncates the target because the version doesn't change across runs).
+1. Reuse the `version` bookmark if present, else pick a fresh one (an interrupted incremental run keeps the same version - resumption relies on the key bookmark, not versioning).
+2. Write `version` and `replication_key` bookmarks; emit `STATE`; emit `SCHEMA` (with the replication key as bookmark property); emit `ACTIVATE_VERSION` (every run - incremental never truncates the target because the version doesn't change across runs).
 3. Query: select the chosen columns from a subquery that selects the whole row set filtered by `key >= '<bookmark>'::<key-datatype>` (omitted entirely when no bookmark exists), ordered by the key ascending, with `LIMIT <limit>` when the `limit` setting is present. (The subquery-with-inner-order shape is a deliberate query-planner optimization.)
-4. For each row: emit the `RECORD`, then set the `replication_key_value` bookmark to that record's converted key value — but **never** bookmark a NULL key value. Emit `STATE` every 10,000 rows.
+4. For each row: emit the `RECORD`, then set the `replication_key_value` bookmark to that record's converted key value - but **never** bookmark a NULL key value. Emit `STATE` every 10,000 rows.
 
 Rows with a NULL replication key are only ever captured while no bookmark exists (they are permanently invisible to bookmarked runs); a NULL never poisons the state.
 
@@ -293,10 +293,10 @@ Rows with a NULL replication key are only ever captured while no bookmark exists
 
 Change data capture from the write-ahead log. A stream's lifecycle: (a) one-off full-table snapshot, then (b) continuous consumption of inserts/updates/deletes from a logical replication slot.
 
-#### 6.3.1 Server prerequisites (operator setup, documented — not performed by the tap)
+#### 6.3.1 Server prerequisites (operator setup, documented - not performed by the tap)
 
 - PostgreSQL 9.4 or newer, connecting to the **primary**.
-- The tap refuses to run (fatal error) on versions affected by a known WAL bug — minimum minor versions: 9.4.21, 9.5.16, 9.6.12, 10.7, 11.2; anything below 9.4 is unsupported.
+- The tap refuses to run (fatal error) on versions affected by a known WAL bug - minimum minor versions: 9.4.21, 9.5.16, 9.6.12, 10.7, 11.2; anything below 9.4 is unsupported.
 - `wal2json` output plugin ≥ 2.3 installed on the server (the tap uses its format version 2).
 - Server configuration: `wal_level=logical`, and `max_replication_slots` / `max_wal_senders` sized appropriately (≥ 5 recommended).
 - A logical replication slot created per database with the `wal2json` plugin: `SELECT pg_create_logical_replication_slot('<slot_name>', 'wal2json');`
@@ -314,7 +314,7 @@ LSNs are converted between PostgreSQL's `file/offset` hex notation (e.g. `16/B37
 
 For a LOG_BASED stream with no bookmarks:
 
-1. Set the stream's `lsn` bookmark to the **end LSN captured at run start** — everything after this point will be replayed from the WAL, so the snapshot and the log stream dovetail without loss (overlap is resolved by target upserts).
+1. Set the stream's `lsn` bookmark to the **end LSN captured at run start** - everything after this point will be replayed from the WAL, so the snapshot and the log stream dovetail without loss (overlap is resolved by target upserts).
 2. Run a standard full-table sync (§6.1), including xmin-based resumability.
 3. Clear the `xmin` bookmark when the copy completes.
 
@@ -327,7 +327,7 @@ All pure-logical streams of one database are consumed in a single replication se
 - Start position: the **minimum** `lsn` bookmark across the participating streams.
 - Each stream gets two automatic schema additions before its `SCHEMA` message: `_sdc_deleted_at` (nullable date-time), and `_sdc_lsn` (nullable string) when `debug_lsn` is on.
 - On servers ≥ 12, set the session's `wal_sender_timeout` to 3 hours.
-- Begin replication on the slot with wal2json options: format version 2, transactions excluded, timestamps included, type info excluded, actions limited to insert/update/delete, and a table allowlist (`add-tables`) of the participating `schema.table` pairs — with space, comma, quote, period and asterisk backslash-escaped per wal2json rules. A failure to start replication (e.g. slot in use) is fatal.
+- Begin replication on the slot with wal2json options: format version 2, transactions excluded, timestamps included, type info excluded, actions limited to insert/update/delete, and a table allowlist (`add-tables`) of the participating `schema.table` pairs - with space, comma, quote, period and asterisk backslash-escaped per wal2json rules. A failure to start replication (e.g. slot in use) is fatal.
 - Send periodic keepalive/status updates (10-second interval).
 
 **Loop:** read messages; for each, process it (§6.3.6) and advance bookmarks. Exit when any of these hold:
@@ -340,7 +340,7 @@ When idle, block on the socket for up to 1 second, then loop.
 
 #### 6.3.6 Message processing
 
-Each wal2json v2 message is a JSON payload with an `action` (`I`nsert / `U`pdate / `D`elete — anything else is a fatal "unsupported payload" error), `schema`, `table`, and either `columns` (I/U: name/type/value triples) or `identity` (D: replica-identity columns). Unparseable payloads are silently skipped; payloads for streams not in this session are skipped.
+Each wal2json v2 message is a JSON payload with an `action` (`I`nsert / `U`pdate / `D`elete - anything else is a fatal "unsupported payload" error), `schema`, `table`, and either `columns` (I/U: name/type/value triples) or `identity` (D: replica-identity columns). Unparseable payloads are silently skipped; payloads for streams not in this session are skipped.
 
 - **Schema drift**: for I/U, if the payload contains column names absent from the stream's schema, re-run discovery for that table, refresh the stream's schema/metadata in place, re-add the automatic properties, and emit a fresh `SCHEMA` message before the record.
 - **Record assembly**: keep only selected columns. For I/U, `_sdc_deleted_at` is `null`; for D, the identity columns are used and `_sdc_deleted_at` is set to the extraction timestamp. With `debug_lsn`, `_sdc_lsn` carries the message's LSN as a string. The `RECORD` uses the version bookmarked for the stream (missing version = fatal error) and the session's extraction timestamp.
@@ -353,7 +353,7 @@ Each wal2json v2 message is a JSON payload with an `action` (`I`nsert / `U`pdate
   - `numeric` (including in arrays): decimal-precise value.
   - `money`: string as-is.
   - `hstore`: the text form is converted into a JSON object by asking the server to explode it into a key/value array (primary connection).
-  - **Arrays**: wal2json emits the PostgreSQL array literal as a string; the tap reconstructs the array by having the server cast the literal to a suitable array type (element types with lossless casts keep their native type — integer, boolean, varchar, cidr, inet, macaddr, real, smallint, double precision; everything else casts to a text array), then converts elements recursively.
+  - **Arrays**: wal2json emits the PostgreSQL array literal as a string; the tap reconstructs the array by having the server cast the literal to a suitable array type (element types with lossless casts keep their native type - integer, boolean, varchar, cidr, inet, macaddr, real, smallint, double precision; everything else casts to a text array), then converts elements recursively.
   - `null` stays `null`; ints/floats/strings pass through; unknown value classes are fatal errors.
 - **Bookmark**: after emitting the record, set that stream's `lsn` bookmark to the message's LSN.
 
@@ -387,7 +387,7 @@ A clean-room implementation must:
 
 ### 7.2 Runtime capabilities
 
-Runtime requirements, described by capability (reference choices shown for orientation only — see §7.1 for version policy):
+Runtime requirements, described by capability (reference choices shown for orientation only - see §7.1 for version policy):
 
 | Capability | Reference choice | Notes |
 |---|---|---|
@@ -428,7 +428,7 @@ Coverage gates from the reference project: ≥ 58% from unit tests alone, ≥ 63
 
 **Discovery math:** precision/scale capping at 100/38 with warnings.
 
-**State transitions:** for each replication method — same method persists bookmarks; switching methods (all six directions) wipes the stream's bookmarks; INCREMENTAL key change wipes bookmarks, including mid-interruption; `last_replication_method` is recorded.
+**State transitions:** for each replication method - same method persists bookmarks; switching methods (all six directions) wipes the stream's bookmarks; INCREMENTAL key change wipes bookmarks, including mid-interruption; `last_replication_method` is recorded.
 
 **FULL_TABLE / INCREMENTAL strategies (mocked DB):** message sequences (state → schema → activate-version → records → state cadence), version selection/reuse, hstore registration only when available, bookmark cadence at exact multiples of the update period, max-replication-key lookup.
 
@@ -444,7 +444,7 @@ Coverage gates from the reference project: ≥ 58% from unit tests alone, ≥ 63
 
 ### 8.3 Integration test coverage (real database)
 
-- **Discovery per type family**: create tables covering strings (with quoted/exotic identifiers), integers, numerics (as PKs, with/without declared precision), dates/times, floats, bools and bits, json/jsonb, uuid, hstore, enums, money, arrays (many element types), array-like quirks, and a canonical "all-types" table; assert the exact stream entry produced — schema, metadata (`table-key-properties`, `schema-name`, `database-name`, `row-count`, `is-view`, per-column `sql-datatype`/`inclusion`/`selected-by-default`), `tap_stream_id`, and definitions.
+- **Discovery per type family**: create tables covering strings (with quoted/exotic identifiers), integers, numerics (as PKs, with/without declared precision), dates/times, floats, bools and bits, json/jsonb, uuid, hstore, enums, money, arrays (many element types), array-like quirks, and a canonical "all-types" table; assert the exact stream entry produced - schema, metadata (`table-key-properties`, `schema-name`, `database-name`, `row-count`, `is-view`, per-column `sql-datatype`/`inclusion`/`selected-by-default`), `tap_stream_id`, and definitions.
 - **Column privileges**: a user granted `SELECT` on a subset of columns only discovers those columns.
 - **Unsupported PK types**: tables whose PKs are unmapped types are discovered with those columns marked unsupported.
 - **Schema refresh**: after altering a table, the refresh step updates stream schema/metadata while preserving selection and replication metadata.
@@ -472,9 +472,9 @@ Coverage gates from the reference project: ≥ 58% from unit tests alone, ≥ 63
 
 ## 10. Known deviations
 
-Everything above documents the reference implementation faithfully — including behaviors that are accidents of implementation rather than design. This section separates the two so a clean-room implementation knows what it must preserve and where it is free (or encouraged) to do better.
+Everything above documents the reference implementation faithfully - including behaviors that are accidents of implementation rather than design. This section separates the two so a clean-room implementation knows what it must preserve and where it is free (or encouraged) to do better.
 
-### 10.1 Contractual — preserve exactly
+### 10.1 Contractual - preserve exactly
 
 These are load-bearing for downstream targets and orchestrators:
 
@@ -485,10 +485,10 @@ These are load-bearing for downstream targets and orchestrators:
 - Sentinel fallbacks for out-of-range temporal values (`9999-12-31T23:59:59.999+00:00` / `9999-12-31T00:00:00+00:00`) and NaN/±Inf → `null` (chosen deliberately for consistency with what wal2json can represent).
 - `_sdc_deleted_at` on log-based streams, `_sdc_lsn` under `debug_lsn`.
 - The flush-control invariant (§6.3.7): the slot's confirmed position must never pass data the target hasn't committed. The *mechanism* (re-reading the state file) is negotiable; the invariant is not.
-- Slot name shape `<prefix>_<dbname>[_<tap_id>]` with the sanitization rules — operators create slots by hand, so whatever the implementation picks must be fixed and documented.
-- The console entry point name `tap-postgres` and the CLI flags in §1.1 (minus the deprecated `--properties`, which is dropped deliberately) — orchestrators invoke the tap by these.
+- Slot name shape `<prefix>_<dbname>[_<tap_id>]` with the sanitization rules - operators create slots by hand, so whatever the implementation picks must be fixed and documented.
+- The console entry point name `tap-postgres` and the CLI flags in §1.1 (minus the deprecated `--properties`, which is dropped deliberately) - orchestrators invoke the tap by these.
 
-### 10.2 Incidental — replicate or fix, but decide consciously
+### 10.2 Incidental - replicate or fix, but decide consciously
 
 Behaviors a clean-room implementation may improve. Each entry: reference behavior → recommendation.
 
@@ -497,12 +497,12 @@ Behaviors a clean-room implementation may improve. Each entry: reference behavio
 3. **Timestamp clamp direction.** The extraction-query clamp (§5) replaces values *below* `0001-01-01` with the **maximum** sentinel `9999-12-31 23:59:59.999`, not a minimum one. Logical replication does the same via its fallback constant. → Preserving this asymmetry keeps snapshot and CDC output consistent; fixing it to a low sentinel is defensible but must be done in both paths at once.
 4. **Hour-24 time fix-up.** Times beginning with `24` (PostgreSQL allows `24:00:00`) are rewritten by replacing the first occurrence of the substring `24` with `00`, mapping end-of-day to start-of-day. Safe only because of the `startswith` guard. → Handle `24:00` explicitly; keep the semantic mapping (24:00 → 00:00) since targets can't represent hour 24.
 5. **xmin-based full-table resume.** Ordering by `xmin::text` (lexicographic, not numeric) with `age()`-based restriction is approximate: concurrent writes, freezes, and text ordering can re-emit or skip rows mid-copy. Tolerable only because a version is activated solely after a complete pass. → A PK-keyset-paginated resume is strictly better where a PK exists; keep the "activate only when complete" rule regardless. Do not treat xmin bookmark values as portable across implementations.
-6. **Silently dropped WAL payloads.** Messages whose payload fails JSON parsing are skipped without logging, yet their LSN still advances the bookmark — undetectable data loss if wal2json ever emits something unexpected. → Log loudly (or fail) on unparseable payloads; skipping silently should not be replicated.
+6. **Silently dropped WAL payloads.** Messages whose payload fails JSON parsing are skipped without logging, yet their LSN still advances the bookmark - undetectable data loss if wal2json ever emits something unexpected. → Log loudly (or fail) on unparseable payloads; skipping silently should not be replicated.
 7. **Per-value server round trips in CDC decoding.** Every array value is reconstructed by sending the literal back to the server inside a fixed dollar-quote tag (a value containing that tag breaks the query), and every hstore value costs another round trip; both open a fresh connection per value. → Parse array/hstore literals client-side; this is a pure implementation detail invisible in output.
-8. **Delete timestamps.** `_sdc_deleted_at` is the session's extraction timestamp, not the transaction commit time — wal2json's included timestamps are ignored, and all records in one session share a single `time_extracted`. → Using the payload's commit timestamp is more truthful; note it changes observable output.
+8. **Delete timestamps.** `_sdc_deleted_at` is the session's extraction timestamp, not the transaction commit time - wal2json's included timestamps are ignored, and all records in one session share a single `time_extracted`. → Using the payload's commit timestamp is more truthful; note it changes observable output.
 9. **`money` as locale-formatted string.** Values pass through with the server's `lc_monetary` formatting (`$1,001.00`), so output depends on server locale. → Faithful but fragile; a numeric-with-currency representation is cleaner if you accept the schema change.
 10. **`bit(n>1)` and other unmapped types dropped.** Multi-bit strings, `bytea`, `interval`, geometric types, etc. are marked `unsupported` and never synced. → A new implementation may map more types (e.g. bit strings/`bytea` as strings, `interval` as string); anything mapped must then be supported in *all three* replication paths.
 11. **Legacy slot-name fallback.** The un-suffixed slot name is probed before the `tap_id`-suffixed one, purely for compatibility with old deployments. → Optional; drop it if there is no legacy fleet, but document the lookup order you keep.
-12. **Naive timestamps assumed UTC.** `timestamp without time zone` values get `+00:00` appended in every path, regardless of the server's actual timezone semantics. This is a documented assumption targets rely on — keep it, but state it prominently in user docs.
+12. **Naive timestamps assumed UTC.** `timestamp without time zone` values get `+00:00` appended in every path, regardless of the server's actual timezone semantics. This is a documented assumption targets rely on - keep it, but state it prominently in user docs.
 13. **State-file feedback loop assumes an orchestrator.** Flush progress during a long-running session depends on some external process writing target-committed state back into the `--state` file; under a plain Singer runner the file never changes and the slot only advances between runs (still correct, just unbounded WAL retention within a run). → Consider an explicit alternative (e.g. reading target state from a pipe/socket) but keep the file mechanism for orchestrator compatibility.
 14. **Query-shape quirks.** The incremental subquery-with-inner-order wrapper and the fixed cursor names exist only to coax the query planner / driver; none of it is observable in output. → Free to change.
