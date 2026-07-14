@@ -24,6 +24,7 @@ classifiers = [
 ]
 dynamic = [ "version" ]
 dependencies = [
+  "backports-datetime-fromisoformat>=2.0.3",
   # psycopg2 (not psycopg 3) is a deliberate choice: psycopg 3.x does not yet
   # implement the streaming logical-replication protocol required by LOG_BASED.
   # https://github.com/psycopg/psycopg/issues/71
@@ -31,7 +32,7 @@ dependencies = [
   "python-dateutil~=2.9.0",
   "pytz==2026.2",
   "singer-python~=6.8.0",
-  "typing-extensions~=4.16.0; python_version < '3.13'"
+  "typing-extensions~=4.16.0; python_version < '3.13'",
 ]
 [[project.authors]]
 name = "Matatika"

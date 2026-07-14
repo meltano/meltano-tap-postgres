@@ -4,6 +4,7 @@ import datetime
 import json
 import re
 import select
+import sys
 import time
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -17,6 +18,12 @@ from singer import utils
 
 from tap_postgres import config as cfg
 from tap_postgres import db, discovery, stream_utils
+
+if sys.version_info < (3, 11):
+    from backports.datetime_fromisoformat import MonkeyPatch
+
+    MonkeyPatch.patch_fromisoformat()
+
 
 LOGGER = singer.get_logger()
 

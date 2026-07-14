@@ -3,8 +3,14 @@
 import datetime
 import json
 import math
+import sys
 from decimal import Decimal
 from typing import Any
+
+if sys.version_info < (3, 11):
+    from backports.datetime_fromisoformat import MonkeyPatch
+
+    MonkeyPatch.patch_fromisoformat()
 
 
 class UnsupportedValueError(Exception):
