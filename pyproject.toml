@@ -12,7 +12,7 @@ keywords = [
   "singer",
   "tap",
 ]
-license = { text = "MIT" }
+license = "MIT"
 requires-python = ">=3.10"
 classifiers = [
   "Programming Language :: Python :: 3 :: Only",
@@ -37,7 +37,7 @@ dependencies = [
   "typing-extensions~=4.16.0; python_version<'3.13'",
 ]
 [[project.authors]]
-name = "Matatika"
+name = "Meltano"
 [project.scripts]
 tap-postgres = "tap_postgres.cli:main"
 
