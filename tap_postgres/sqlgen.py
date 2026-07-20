@@ -9,6 +9,7 @@ TIMESTAMP_MIN_LITERAL = "0001-01-01 00:00:00.000"
 TIMESTAMP_MAX_LITERAL = "9999-12-31 23:59:59.999"
 
 _SCALAR_TIMESTAMP_TYPES = ("timestamp without time zone", "timestamp with time zone")
+_DATE_TYPE = "date"
 
 # sql-datatype values come from discovery metadata but appear verbatim in SQL
 # casts, so constrain them to a safe identifier-ish alphabet.
@@ -33,6 +34,20 @@ def select_expression(column: str, sql_datatype: str | None) -> str:
     0001-01-01..9999-12-31 23:59:59.999 becomes the *maximum* sentinel - the
     below-range direction is deliberate (SPEC §5, §10.2.3). Timestamp arrays and
     columns missing from metadata pass through unwrapped.
+
+    ``date`` columns are cast to ``timestamp`` here too (unclamped - Postgres's
+    `date` max year, 5874897, is far past `timestamp`'s, so an in-range-for-`date`
+    value could in principle overflow this cast; not handled, see SPEC §5/§10.2.3
+    for the equivalent timestamp clamp this doesn't yet have a `date` counterpart
+    of). discovery.py declares `date` columns with `format: date-time` same as a
+    real timestamp column (SPEC §5), and conversion.py's RECORD-mode conversion
+    (`convert_date`) honors that by appending a midnight time component - but nothing
+    upstream of the driver does the same for the ADBC BATCH path, which hands off
+    the driver's own Arrow type unchanged. Without this cast, a `date` column's Arrow
+    BATCH file keeps Postgres's native `date32` physical type, silently mismatching
+    the declared JSON Schema format; some downstream consumers trust that promise
+    literally (e.g. Snowflake refuses to cast a semi-structured `DATE` value straight
+    to `TIMESTAMP_NTZ`, even though the same value round-trips fine as a `TIMESTAMP`).
     """
     quoted = quote_ident(column)
     if sql_datatype in _SCALAR_TIMESTAMP_TYPES:
@@ -43,6 +58,8 @@ def select_expression(column: str, sql_datatype: str | None) -> str:
             f"THEN '{TIMESTAMP_MAX_LITERAL}' "
             f"ELSE {quoted} END AS {quoted}"
         )
+    if sql_datatype == _DATE_TYPE:
+        return f"{quoted}::timestamp AS {quoted}"
     return quoted
 
 

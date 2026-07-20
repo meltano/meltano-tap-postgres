@@ -7,8 +7,10 @@ driver produces for real tables.
 """
 
 import copy
+import datetime
 import json
 
+import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
 
@@ -100,6 +102,35 @@ class TestFullTableArrow:
         bookmark = state["bookmarks"][f"{test_schema}-people"]
         assert bookmark["last_replication_method"] == "FULL_TABLE"
         assert "xmin" not in bookmark
+
+    def test_date_column_lands_as_timestamp_not_date32(
+        self, superuser_connection, tap_config, test_schema, emitted_messages, capsys, tmp_path
+    ):
+        # A `date` column's SCHEMA message declares `format: date-time` (discovery.py
+        # groups `date` with the timestamp types), but ADBC's own Arrow type for
+        # Postgres `date` is `date32` unless the extraction query itself casts it --
+        # select_expression does that specifically so this mismatch can't reach a
+        # downstream target that trusts the declared format literally (e.g. Snowflake
+        # refusing to cast a semi-structured DATE value straight to TIMESTAMP_NTZ).
+        with superuser_connection.cursor() as cur:
+            cur.execute(
+                f"""
+                CREATE TABLE "{test_schema}".accounts (id integer PRIMARY KEY, signup_date date);
+                INSERT INTO "{test_schema}".accounts VALUES (1, '2025-05-08'), (2, NULL);
+                """
+            )
+        [stream] = discover_streams(tap_config)
+        catalog = {"streams": [select_stream(stream, replication_method="FULL_TABLE")]}
+        config = {**tap_config, "batch_config": {"storage": {"root": str(tmp_path)}}}
+
+        sync.do_sync(config, catalog, {}, None)
+
+        [message] = batch_messages(capsys)
+        table = read_arrow_table(message)
+        assert pa.types.is_timestamp(table.schema.field("signup_date").type)
+        rows = {row["id"]: row["signup_date"] for row in table.to_pylist()}
+        assert rows[1] == datetime.datetime(2025, 5, 8)
+        assert rows[2] is None
 
     def test_view_sync(
         self, superuser_connection, tap_config, test_schema, emitted_messages, capsys, tmp_path

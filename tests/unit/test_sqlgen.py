@@ -48,6 +48,19 @@ class TestTimestampClamp:
         assert select_expression("mystery", None) == '"mystery"'
 
 
+class TestDateCast:
+    def test_date_column_cast_to_timestamp(self):
+        # date32 (Arrow's native type for a Postgres `date` column when read via
+        # ADBC/BATCH, with no cast) doesn't match the "date-time" JSON Schema format
+        # discovery.py declares for `date` columns -- downstream consumers that trust
+        # the declared format literally (e.g. Snowflake casting a semi-structured value
+        # to TIMESTAMP_NTZ) reject the mismatched physical type.
+        assert select_expression("signup_date", "date") == '"signup_date"::timestamp AS "signup_date"'
+
+    def test_date_array_passes_through_unwrapped(self):
+        assert select_expression("dates", "date[]") == '"dates"'
+
+
 class TestFullTableSql:
     def _stream(self):
         return make_stream(
