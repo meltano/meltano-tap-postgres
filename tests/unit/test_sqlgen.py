@@ -55,7 +55,9 @@ class TestDateCast:
         # discovery.py declares for `date` columns -- downstream consumers that trust
         # the declared format literally (e.g. Snowflake casting a semi-structured value
         # to TIMESTAMP_NTZ) reject the mismatched physical type.
-        assert select_expression("signup_date", "date") == '"signup_date"::timestamp AS "signup_date"'
+        assert (
+            select_expression("signup_date", "date") == '"signup_date"::timestamp AS "signup_date"'
+        )
 
     def test_date_array_passes_through_unwrapped(self):
         assert select_expression("dates", "date[]") == '"dates"'

@@ -43,7 +43,7 @@ tap-postgres = "tap_postgres.cli:main"
 
 [dependency-groups]
 dev = [
-  "ruff~=0.15.21",
+  "ruff~=0.15.22",
   { include-group = "test" },
   { include-group = "typing" },
 ]
@@ -69,6 +69,7 @@ source = "vcs"
 [tool.ruff]
 line-length = 100
 preview = true
+required-version = ">=0.15.22"
 [tool.ruff.lint]
 select = [
   "ANN",
@@ -88,7 +89,7 @@ select = [
   "W",
 ]
 ignore = [
-  "SIM108", # ternary is not always clearer
+  "if-else-block-instead-of-if-exp", # ternary is not always clearer
 ]
 [tool.ruff.lint.per-file-ignores]
 # Fixtures are requested for their side effects, and fakes must match the
