@@ -50,7 +50,7 @@ dev = [
 test = [
   "pytest>=9.1",
   "pytest-cov>=7.1",
-  "testcontainers>=4.15.0rc4",
+  "testcontainers>=4.15",
 ]
 typing = [
   "pyarrow-stubs>=17",
