@@ -1,6 +1,9 @@
 """Sync orchestration against mocked strategies (SPEC §4.1, §4.3)."""
 
+from unittest import mock
+
 import pytest
+import singer
 
 from tap_postgres import discovery, logical, sync
 from tests.unit.conftest import make_stream
@@ -166,3 +169,60 @@ class TestDoSync:
         ]
         assert "public-gone" not in state["bookmarks"]
         assert "public-old-incremental" in state["bookmarks"]
+
+    def test_new_table_bookmark_survives_logical_phase(self, emitted_messages):
+        """Regression test for https://github.com/transferwise/pipelinewise-tap-postgres/issues/107.
+
+        A table added mid-run to an already-running LOG_BASED pipeline must keep
+        its bookmark after the pre-existing tables' logical replication phase
+        runs, rather than being silently dropped and re-snapshotted every run.
+        """
+        catalog = {
+            "streams": [
+                make_stream(
+                    table_name="events", stream_metadata={"replication-method": "LOG_BASED"}
+                ),
+                make_stream(
+                    table_name="orders", stream_metadata={"replication-method": "LOG_BASED"}
+                ),
+            ]
+        }
+        # "events" already completed its snapshot and streams logically;
+        # "orders" was just added to the catalog and has no bookmark yet.
+        state = {
+            "bookmarks": {
+                "public-events": {"lsn": 5000, "last_replication_method": "LOG_BASED"},
+            }
+        }
+
+        def fake_traditional(config, stream, state, method, end_lsn, batch_config=None):
+            # Mirrors sync_traditional_stream's LOG_BASED snapshot bookmark
+            # write (tap_postgres/sync.py, `if ... lsn ... is None`): the new
+            # table's initial snapshot bookmarks the end LSN before syncing.
+            stream_id = stream["tap_stream_id"]
+            if singer.get_bookmark(state, stream_id, "lsn") is None:
+                state = singer.write_bookmark(state, stream_id, "lsn", end_lsn)
+            return state
+
+        def fake_logical(config, streams, state, end_lsn, state_file, dbname):
+            # Mirrors LogicalSession.write_all_bookmarks/finalize
+            # (tap_postgres/logical.py): only bookmarks the stream_ids it was
+            # handed, it never rebuilds state["bookmarks"] from scratch.
+            for stream in streams:
+                state = singer.write_bookmark(state, stream["tap_stream_id"], "lsn", end_lsn)
+            return state
+
+        with (
+            mock.patch.object(sync, "sync_traditional_stream", fake_traditional),
+            mock.patch.object(discovery, "refresh_streams_schema", return_value=None),
+            mock.patch.object(logical, "fetch_current_lsn", return_value=99_999),
+            mock.patch.object(logical, "sync_logical_streams", fake_logical),
+        ):
+            state = sync.do_sync(CONFIG, catalog, state, None)
+
+        assert state["bookmarks"]["public-orders"]["lsn"] == 99_999
+        assert state["bookmarks"]["public-events"]["lsn"] == 99_999
+
+        # A subsequent run must treat "orders" as pure-logical now, not
+        # re-snapshot it.
+        assert sync.classify_log_based_work(state, "public-orders") == "logical"
