@@ -613,12 +613,26 @@ def sync_logical_streams(
                 break
 
             if now - last_feedback > FEEDBACK_INTERVAL_SECONDS:
-                cursor.send_feedback(force=True)
+                # Request a reply: wal_sender_timeout is set high (below) to avoid the
+                # server dropping an idle connection, which also suppresses its own
+                # unsolicited keepalives. Without reply=True, cursor.wal_end would only
+                # refresh once every wal_sender_timeout/2, defeating the end_lsn check.
+                cursor.send_feedback(force=True, reply=True)
                 session.refresh_committed_lsn_from_state_file(cursor)
                 last_feedback = now
 
             message = cursor.read_message()
             if message is None:
+                # A keepalive updates cursor.wal_end without producing a message; if the
+                # server has already reported a position past end_lsn, don't wait out
+                # logical_poll_total_seconds for an XLogData message that may never come.
+                if break_at_end and cursor.wal_end > end_lsn:
+                    LOGGER.info(
+                        "Stopping: keepalive-reported WAL position %s is beyond end LSN %s",
+                        int_to_lsn(cursor.wal_end),
+                        int_to_lsn(end_lsn),
+                    )
+                    break
                 # Block on the socket for up to a second, then loop (SPEC §6.3.5).
                 select.select([cursor], [], [], 1.0)
                 continue

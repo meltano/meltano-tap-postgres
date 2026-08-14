@@ -79,7 +79,8 @@ def pg_stack():
                 str(DOCKER_CONTEXT / "primary-init"), "/docker-entrypoint-initdb.d", "ro"
             )
             .with_command(
-                "postgres -c wal_level=logical -c max_replication_slots=10 -c max_wal_senders=10"
+                "postgres -c wal_level=logical -c max_replication_slots=10"
+                " -c max_wal_senders=10 -c output_plugin_libraries=wal2json"
             )
         )
         with primary:

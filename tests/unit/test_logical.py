@@ -504,11 +504,12 @@ class FakeMessage:
 
 
 class FakeReplicationCursor:
-    def __init__(self, script, fail_start=False):
+    def __init__(self, script, fail_start=False, wal_end=0):
         self.script = list(script)
         self.fail_start = fail_start
         self.start_kwargs = None
         self.feedback = []
+        self.wal_end = wal_end
 
     def start_replication(self, **kwargs):
         if self.fail_start:
@@ -553,10 +554,11 @@ def run_session(
     fail_start=False,
     end_lsn=10_000,
     state_file=None,
+    wal_end=0,
 ):
     stream = logical_stream()
     state = state or {"bookmarks": {"public-test_table": {"version": 111, "lsn": 1000}}}
-    replication_cursor = FakeReplicationCursor(script, fail_start=fail_start)
+    replication_cursor = FakeReplicationCursor(script, fail_start=fail_start, wal_end=wal_end)
 
     def fake_open_connection(
         cfg_dict, primary=False, dbname=None, connection_factory=None, extra_options=None
@@ -591,6 +593,21 @@ class TestSessionLoop:
             monkeypatch,
             script=[],
             config={"max_run_seconds": 1, "logical_poll_total_seconds": 3600},
+        )
+        assert type(emitted_messages[-1]).__name__ == "StateMessage"
+
+    def test_stops_promptly_on_keepalive_past_end_lsn(
+        self, emitted_messages, monkeypatch, fast_select
+    ):
+        # No XLogData message ever arrives, but the server's keepalive (surfaced via
+        # cursor.wal_end even when read_message() returns None) already reports a
+        # position past end_lsn: don't wait out logical_poll_total_seconds.
+        _state, _cursor = run_session(
+            monkeypatch,
+            script=[],
+            end_lsn=10_000,
+            wal_end=15_000,
+            config={"logical_poll_total_seconds": 3600, "max_run_seconds": 3600},
         )
         assert type(emitted_messages[-1]).__name__ == "StateMessage"
 

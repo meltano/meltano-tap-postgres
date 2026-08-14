@@ -121,6 +121,10 @@ narrowing: only `encoding.format: "arrow"` is supported for now (`jsonl`/`parque
    WAL bug are refused: upgrade to at least 9.4.21 / 9.5.16 / 9.6.12 / 10.7 / 11.2.
 2. Install **wal2json ≥ 2.3** on the server.
 3. Set `wal_level=logical`, and size `max_replication_slots` / `max_wal_senders` (≥ 5 recommended).
+   PostgreSQL 14.24, 15.19, 16.15, 17.11, 18.6 and newer restrict logical decoding output
+   plugins by default; on those versions, also allow-list wal2json:
+   `output_plugin_libraries = 'pgoutput, test_decoding, wal2json'`. Without it, slot creation
+   fails with `InsufficientPrivilege: library "wal2json" may not be used as an output plugin`.
 4. Create a logical replication slot per database. The tap looks for
    **`tap_postgres_<dbname>`** first, then **`tap_postgres_<dbname>_<tap_id>`**
    (lowercased, with every character outside `[a-z0-9_]` replaced by `_`):
