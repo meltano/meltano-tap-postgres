@@ -19,6 +19,8 @@ services:
       - max_replication_slots=10
       - -c
       - max_wal_senders=10
+      - -c
+      - output_plugin_libraries=wal2json
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U tap_postgres -d tap_postgres_test"]
       interval: 2s
