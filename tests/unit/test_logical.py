@@ -143,6 +143,39 @@ class TestSlotNames:
         with pytest.raises(LogicalReplicationError, match="replication slot"):
             locate_replication_slot(connection, "db")
 
+    def test_lookup_falls_back_to_legacy_pipelinewise_unsuffixed_name(self):
+        class RecordingCursor(BaseRecordingCursor):
+            def execute(self, query, vars=None):
+                assert vars is not None
+                self.queries.append(vars[0])
+                self._hit = (vars[0],) if vars[0] == "pipelinewise_db" else None
+
+        cursor = RecordingCursor()
+        assert logical.locate_replication_slot_by_cur(cursor, "db", "pipe") == "pipelinewise_db"
+        assert cursor.queries == [
+            "tap_postgres_db",
+            "tap_postgres_db_pipe",
+            "pipelinewise_db",
+        ]
+
+    def test_lookup_falls_back_to_legacy_pipelinewise_suffixed_name(self):
+        class RecordingCursor(BaseRecordingCursor):
+            def execute(self, query, vars=None):
+                assert vars is not None
+                self.queries.append(vars[0])
+                self._hit = (vars[0],) if vars[0] == "pipelinewise_db_pipe" else None
+
+        cursor = RecordingCursor()
+        assert (
+            logical.locate_replication_slot_by_cur(cursor, "db", "pipe") == "pipelinewise_db_pipe"
+        )
+        assert cursor.queries == [
+            "tap_postgres_db",
+            "tap_postgres_db_pipe",
+            "pipelinewise_db",
+            "pipelinewise_db_pipe",
+        ]
+
 
 class TestWal2JsonTables:
     def test_escaping(self):
