@@ -133,6 +133,11 @@ narrowing: only `encoding.format: "arrow"` is supported for now (`jsonl`/`parque
    SELECT pg_create_logical_replication_slot('tap_postgres_mydb_mypipeline', 'wal2json');
    ```
 
+   Migrating from [pipelinewise-tap-postgres](https://github.com/transferwise/pipelinewise-tap-postgres)?
+   Its existing `pipelinewise_<dbname>` / `pipelinewise_<dbname>_<tap_id>` slot is picked up
+   automatically as a fallback, so the old slot (and its WAL position) can keep being used
+   without recreating it.
+
 5. The connecting user needs replication privileges.
 
 ### Flush control
@@ -171,7 +176,8 @@ Conscious decisions on the incidental behaviors catalogued in SPEC.md §10.2:
 - **psycopg2** (2.9.x) remains the driver: psycopg 3 does not yet implement the streaming
   logical-replication protocol required by LOG_BASED (SPEC §7.2).
 - Slot prefix is **`tap_postgres`**; the un-suffixed name is probed before the
-  `tap_id`-suffixed one (documented lookup order, §10.2.11).
+  `tap_id`-suffixed one (documented lookup order, §10.2.11), followed by the legacy
+  `pipelinewise`-prefixed names for pipelinewise-tap-postgres migrations.
 
 ## Development
 

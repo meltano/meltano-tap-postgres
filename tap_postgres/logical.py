@@ -34,6 +34,10 @@ LOGGER = singer.get_logger()
 # Operators create replication slots by hand with exactly this prefix (SPEC §6.3.2).
 SLOT_PREFIX = "tap_postgres"
 
+# Fallback prefix for slots created by the legacy pipelinewise-tap-postgres tap, so
+# customers migrating from it don't need to recreate their replication slot.
+LEGACY_SLOT_PREFIX = "pipelinewise"
+
 FALLBACK_TIMESTAMP = "9999-12-31T23:59:59.999+00:00"
 FALLBACK_DATE = "9999-12-31T00:00:00+00:00"
 _MAX_NAIVE_TIMESTAMP = datetime.datetime(9999, 12, 31, 23, 59, 59, 999000)
@@ -133,8 +137,8 @@ def fetch_current_lsn(config: dict[str, Any]) -> int:
 # Replication slots (SPEC §6.3.2)
 
 
-def generate_slot_name(dbname: str, tap_id: str | None = None) -> str:
-    raw = f"{SLOT_PREFIX}_{dbname}_{tap_id}" if tap_id else f"{SLOT_PREFIX}_{dbname}"
+def generate_slot_name(dbname: str, tap_id: str | None = None, prefix: str = SLOT_PREFIX) -> str:
+    raw = f"{prefix}_{dbname}_{tap_id}" if tap_id else f"{prefix}_{dbname}"
     return re.sub(r"[^a-z0-9_]", "_", raw.lower())
 
 
@@ -143,10 +147,14 @@ def locate_replication_slot_by_cur(
     dbname: str,
     tap_id: str | None = None,
 ) -> str:
-    """Probe the un-suffixed name first (legacy deployments), then the suffixed one."""
+    """Probe the un-suffixed name first, then the suffixed one, then the same two
+    under the legacy pipelinewise-tap-postgres prefix for migrated deployments."""
     candidates = [generate_slot_name(dbname)]
     if tap_id:
         candidates.append(generate_slot_name(dbname, tap_id))
+    candidates.append(generate_slot_name(dbname, prefix=LEGACY_SLOT_PREFIX))
+    if tap_id:
+        candidates.append(generate_slot_name(dbname, tap_id, prefix=LEGACY_SLOT_PREFIX))
     for candidate in candidates:
         cursor.execute(
             "SELECT slot_name FROM pg_replication_slots WHERE slot_name = %s", (candidate,)
